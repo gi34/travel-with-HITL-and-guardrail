@@ -18,8 +18,8 @@ from langchain_core.messages import(AnyMessage,HumanMessage,AIMessage, SystemMes
 
 from langchain_groq import ChatGroq
 #from tools.tavily_tool import tavily_search
-from tools.flight_tool import search_flight
-from MCP_client_test import tavily_mcp_search
+#from tools.flight_tool import search_flight
+from mcp_client import tavily_mcp_search, aviation_search
 
 
 
@@ -60,22 +60,78 @@ class TravelState(TypedDict):
     itinerary: str
     llm_calls: int
 
+# every agent returns the result to update the shared status
 
 # ==============
 # flight agent
 # ==============
+# add llm to the function: to decide which tool to use from MCP
+
+flight_prompt = """
+You are a travel flight expert. Provide answer to the question using the provided information only.
+
+Query : {query}
+
+Airport Information: {airport_information}
+
+Airline Information: {airline_information}
+
+Generate answer with the format:
+1. Likely departure airport
+2. Likely arrival airport
+3. Airline
+4. Typical flight duration
+5. Estimated airfare range
+6. Peak season pricing warning
+7. Booking advice
+
+Return concise travel guidance.
+"""
 
 def flight_agent(state: TravelState):
-    query = state['user_query']
-    flight_data = search_flight(query)
+    print("\nInside Flight Agent")
 
+    query = state["user_query"]
+
+    try:
+        airports = asyncio.run(
+            aviation_search("list_airports")
+        )
+
+        airlines = asyncio.run(
+            aviation_search("list_airlines")
+        )
+
+        print("\nAirports:\n", airports)
+        print("\nAirlines:\n", airlines)
+
+
+        prompt = flight_prompt.format(
+            query=query,
+            airport_information=str(airports)[:3000],
+            airline_information=str(airlines)[:3000]
+        )
+
+        response = llm.invoke([
+            SystemMessage(content = "You are an expert travel flight planner."),
+            HumanMessage(content = prompt)
+        ])
+
+        flight_data = response.content
+
+    except Exception as e:
+
+        flight_data = f"Flight information unavailable: {str(e)}"
+
+    # update the status
     return {
         "flight_status": flight_data,
-        "messages":[
-            AIMessage(content="Flight results fetched.")
+        "messages": [
+            AIMessage( content = "Flight recommendations generated")
         ],
         "llm_calls": state.get("llm_calls",0)+1
     }
+
 
 
 # ==============
@@ -256,7 +312,7 @@ def run_travel_agent(user_input: str, thread_id: str| None = None):
     return {
         "thread_id": thread_id,
         "answer": final_answer,
-        "flight_results": result.get('flight_status',""),
+        "flight_status": result.get('flight_status',""),
         "hotel_results": result.get("hotel_result",""),
         "itinerary": result.get("itinerary",""),
         "llm_calls": result.get("llm_calls",0)
