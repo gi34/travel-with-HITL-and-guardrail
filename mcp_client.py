@@ -1,6 +1,6 @@
 import os, asyncio, certifi
-import sys
 from dotenv import load_dotenv
+from langchain_groq import ChatGroq
 from langchain_mcp_adapters.client import MultiServerMCPClient
 load_dotenv()
 
@@ -9,6 +9,8 @@ os.environ["REQUEST_CA_BUNDLE"] = certifi.where()
 
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
 AVIATION_STACK_API_KEY = os.getenv("AVIATIONSTACK_API_KEY")
+WEATHER_API_KEY = os.getenv("OPEN_WEATHER_API_KEY")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 
 # A single MCP that provide different tools (API):
@@ -30,7 +32,18 @@ client = MultiServerMCPClient(
               "env": {
                 "AVIATION_STACK_API_KEY": AVIATION_STACK_API_KEY
               }
+            },
+
+        "weather":{
+            "transport": "stdio",
+            "command": "/Users/lamhuishan/Documents/vs code/travel agent/.venv/bin/python",
+            "args": [
+                os.path.join(os.path.dirname(__file__), "weather_mcp.py")
+            ],
+            "env": {
+                "OPEN_WEATHER_API_KEY": WEATHER_API_KEY
             }
+        }
 
     }
 )
@@ -110,3 +123,73 @@ async def aviation_search(tool_name:str, tool_args: dict=None):
 
     return result
 
+
+# ======= 
+# weather tool from MCP
+# =======
+
+weather_tool = None
+forecast_tool=None
+
+
+async def initialize_weather_tool():
+
+    global weather_tool, forecast_tool
+
+    if weather_tool is not None:
+        return
+
+    
+    tools = await client.get_tools()
+
+    weather_tool = next(
+        tool
+        for tool in tools
+        if tool.name == "get_weather"
+    )
+
+    forecast_tool = next(
+        tool
+        for tool in tools
+        if tool.name == "get_forecast"
+    )
+
+
+async def weather_mcp_search (city:str):
+    await initialize_weather_tool()
+
+    return await weather_tool.ainvoke(
+        {
+            "city":city, 
+        }
+    )
+
+async def forecast_mcp_search (city:str):
+    await initialize_weather_tool()
+
+    return await forecast_tool.ainvoke(
+        {
+            "city":city, 
+        }
+    )
+
+
+
+# extract destination from query
+llm = ChatGroq(
+    api_key=GROQ_API_KEY,
+    model= "openai/gpt-oss-20b"
+)
+
+prompt = """
+Extract only the destination city or country.
+
+Query: {query}
+
+Return only destination name.
+"""
+
+def extract_destination(query:str):
+    response = llm.invoke(prompt)    
+
+    return response.content.strip()

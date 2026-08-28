@@ -82,6 +82,7 @@ async def travel_planner(request_data: TravelRequest):
                 "answer": result["answer"],
                 "flight_results": result["flight_status"],
                 "hotel_results": result["hotel_results"],
+                'weather': result["weather"],
                 "itinerary": result["itinerary"],
                 "llm_calls": result["llm_calls"]
             }
