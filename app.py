@@ -1,11 +1,11 @@
 from pathlib import Path
 import traceback, uvicorn
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from pydantic import BaseModel
-from backend import run_travel_agent
+from pydantic import BaseModel, Field
+from backend import run_travel_agent, resume_travel_agent
 import nest_asyncio
 
 # allow nested event loops for async calls in FastAPI
@@ -48,6 +48,15 @@ async def home(request: Request):
     )
 
 
+@app.get("/result", response_class=HTMLResponse)
+async def result_page(request: Request):
+    return templates.TemplateResponse(
+        request=request,
+        name="result.html",
+        context={}
+    )
+
+
 '''
 1. User clicks the send button (the function can be found in script.js)
 2. The button triggers sendMessages() in script.js
@@ -80,11 +89,17 @@ async def travel_planner(request_data: TravelRequest):
                 "success": True,
                 "thread_id": result["thread_id"],
                 "answer": result["answer"],
-                "flight_results": result["flight_status"],
-                "hotel_results": result["hotel_results"],
-                'weather': result["weather"],
-                "itinerary": result["itinerary"],
-                "llm_calls": result["llm_calls"]
+                "requires_approval": result.get("requires_approval", False),
+                "approval_request": result.get("approval_request", ""),
+                "flight_results": result.get("flight_results", ""),
+                "hotel_results": result.get("hotel_results", ""),
+                "weather": result.get("weather", ""),
+                "budget_results": result.get("budget_results", ""),
+                "itinerary": result.get("itinerary", ""),
+                "selected_agents": result.get("selected_agents", []),
+                "supervisor_reasoning": result.get("supervisor_reasoning", ""),
+                "guardrail_allowed": result.get("guardrail_allowed", True),
+                "llm_calls": result.get("llm_calls", 0)
             }
         )
 
@@ -100,6 +115,49 @@ async def travel_planner(request_data: TravelRequest):
             }
         )
 
+class ApprovalRequest(BaseModel):
+    thread_id: str = Field(min_length=1)
+    approved: bool
+    feedback: str = ""
+
+
+@app.post("/api/travel/approve")
+async def approve_travel_plan(request_data: ApprovalRequest):
+    try:
+        if not request_data.approved and not request_data.feedback.strip():
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "success": False,
+                    "error": "Please provide revision feedback when rejecting the draft.",
+                },
+            )
+
+        result = resume_travel_agent(
+            thread_id=request_data.thread_id,
+            approved=request_data.approved,
+            feedback=request_data.feedback,
+        )
+
+        return JSONResponse(
+            content={
+                "success": True,
+                **result,
+            }
+        )
+
+    except Exception as exc:
+        print("APPROVAL ERROR:", exc)
+        traceback.print_exc()
+
+        return JSONResponse(
+            status_code=500,
+            content={
+                "success": False,
+                "error": str(exc),
+            },
+        )
+
 
 @app.get("/health")
 async def health_check():
@@ -110,7 +168,12 @@ async def health_check():
 
 @app.get("/favicon.ico")
 async def favicon():
-    return JSONResponse(content={})
+    return FileResponse(BASE_DIR / "static" / "favicon.svg")
+
+
+@app.get("/apple-touch-icon.png")
+async def apple_touch_icon():
+    return FileResponse(BASE_DIR / "static" / "favicon.svg")
 
 
 if __name__ == "__main__":

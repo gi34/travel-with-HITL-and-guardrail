@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Your generated AI travel itinerary.">
+  <title>Travel Itinerary</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Noto+Serif+JP:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="site-header result-header-bar">
+    <a href="/" class="brand" aria-label="Back to planner">
+      <span class="brand-mark">T</span>
+      <span class="brand-name">Travel AI</span>
+    </a>
+  </header>
+
+  <main class="result-page-shell">
+    <div class="result-page-layout">
+      
+      <!-- LEFT SIDEBAR -->
+      <aside class="result-side-nav">
+        <div class="side-label">Trip Details</div>
+
+        <div id="tripDetailsContainer" class="trip-details">
+          <!-- Populated by JavaScript -->
+        </div>
+
+        <div class="side-divider"></div>
+
+        <div class="side-label">Plan Sections</div>
+
+        <nav id="resultSectionNav" class="result-section-nav" aria-label="Itinerary sections">
+          <!-- Populated dynamically from itinerary headings -->
+        </nav>
+
+        <div class="side-divider"></div>
+
+        <div class="side-label">Plan Status</div>
+
+        <div id="planStatus" class="plan-status">
+          <span class="status-dot"></span>
+          <span class="status-title">Itinerary Ready</span>
+        </div>
+      </aside>
+
+
+      <!-- MAIN CONTENT -->
+      <article class="result-document">
+        <div class="result-document-top">
+          <div>
+            <div class="eyebrow result-eyebrow">
+              <span class="line"></span>
+              <span>Itinerary</span>
+              <span class="line"></span>
+            </div>
+            <h1 id="resultPageTitle">Your Final AI Travel Plan</h1>
+          </div>
+
+          <div class="result-actions">
+            <button class="copy-btn" onclick="copyResult()">Copy</button>
+            <button class="download-btn" onclick="downloadPDF()">Download</button>
+          </div>
+        </div>
+
+        <div id="resultPageContent" class="result-page-content"></div>
+
+        <div id="resultPageContent" class="result-page-content"></div>
+
+        <!-- AI WORKFLOW -->
+        <section id="workflowSection" class="workflow-section hidden">
+          <div class="workflow-header">
+            <div>
+              <span class="eyebrow">
+                <span class="line"></span>
+                <span>AI Workflow</span>
+                <span class="line"></span>
+              </span>
+
+              <h2>How your travel plan was created</h2>
+            </div>
+
+            <span id="guardrailBadge" class="guardrail-badge">
+              Guardrail passed
+            </span>
+          </div>
+
+          <div class="workflow-reasoning">
+            <h3>Supervisor reasoning</h3>
+            <p id="supervisorReasoning">
+              Supervisor routing completed.
+            </p>
+          </div>
+
+          <div class="workflow-agents">
+            <h3>Selected travel specialists</h3>
+            <div id="agentChips" class="agent-chips"></div>
+          </div>
+        </section>
+
+
+      <section id="approvalSectionResult" class="approval-section hidden">
+        <div class="approval-icon">✓</div>
+        <div class="approval-content">
+          <span class="eyebrow">
+            <span class="line"></span>
+            <span>Review</span>
+            <span class="line"></span>
+          </span>
+          <h2>Is this itinerary right?</h2>
+          <p id="approvalRequestResult">
+            Review the draft. Approve to finalize or provide feedback for adjustments.
+          </p>
+
+          <textarea
+            id="approvalFeedbackResult"
+            class="feedback-input"
+            placeholder="Any feedback? E.g., prefer mountain locations, add specific activities, adjust dates..."
+          ></textarea>
+
+          <div class="approval-actions">
+            <button id="approveBtn" class="approve-btn" onclick="submitApprovalFromResult(true)">
+              Approve
+            </button>
+            <button id="reviseBtn" class="revise-btn" onclick="submitApprovalFromResult(false)">
+              Revise
+            </button>
+          </div>
+        </div>
+      </section>
+      </article>
+    </div>
+  </main>
+
+  <div id="errorBox" class="error-box hidden"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+  <script src="/static/script.js"></script>
+  <script>
+
+
+  document.addEventListener("DOMContentLoaded", function () {
+
+    currentThreadId =
+      localStorage.getItem("travel_thread_id") ||
+      localStorage.getItem("travel_result_thread_id") ||
+      null;
+
+    const markdown =
+      localStorage.getItem("travel_result_markdown") || "";
+
+    const title =
+      localStorage.getItem("travel_result_title") ||
+      "Your Final AI Travel Plan";
+
+    const requiresApproval =
+      localStorage.getItem("travel_requires_approval") === "true";
+
+    const approvalRequest =
+      localStorage.getItem("travel_approval_request") ||
+      "Review the draft. Approve to finalize or provide feedback for adjustments.";
+
+    const resultContent =
+      document.getElementById("resultPageContent");
+
+    const resultTitle =
+      document.getElementById("resultPageTitle");
+
+    // Render title
+    if (resultTitle) {
+      resultTitle.textContent = title;
+    }
+
+    // Render itinerary FIRST
+    if (resultContent) {
+      if (typeof marked !== "undefined") {
+        resultContent.innerHTML = marked.parse(markdown);
+      } else {
+        resultContent.innerText = markdown;
+      }
+
+      latestAnswerMarkdown = markdown;
+
+      // Build sidebar AFTER itinerary is rendered
+      buildResultSectionNavigation();
+    }
+
+    // Populate trip details
+    const tripDetailsContainer =
+      document.getElementById("tripDetailsContainer");
+
+    const tripConstraints =
+      localStorage.getItem("travel_trip_constraints");
+
+    if (tripDetailsContainer && tripConstraints) {
+      try {
+        const constraints = JSON.parse(tripConstraints);
+        let detailsHTML = "";
+
+        if (constraints.destination) {
+          detailsHTML += `
+            <div class="trip-detail">
+              <span class="detail-label">Destination:</span>
+              <span class="detail-value">${constraints.destination}</span>
+            </div>`;
+        }
+
+        if (constraints.origin) {
+          detailsHTML += `
+            <div class="trip-detail">
+              <span class="detail-label">From:</span>
+              <span class="detail-value">${constraints.origin}</span>
+            </div>`;
+        }
+
+        if (constraints.duration) {
+          detailsHTML += `
+            <div class="trip-detail">
+              <span class="detail-label">Duration:</span>
+              <span class="detail-value">${constraints.duration}</span>
+            </div>`;
+        }
+
+        if (constraints.budget) {
+          detailsHTML += `
+            <div class="trip-detail">
+              <span class="detail-label">Budget:</span>
+              <span class="detail-value">${constraints.budget}</span>
+            </div>`;
+        }
+
+        if (constraints.travel_style) {
+          detailsHTML += `
+            <div class="trip-detail">
+              <span class="detail-label">Style:</span>
+              <span class="detail-value">${constraints.travel_style}</span>
+            </div>`;
+        }
+
+        tripDetailsContainer.innerHTML = detailsHTML;
+
+      } catch (e) {
+        console.error("Could not parse trip constraints:", e);
+      }
+    }
+
+      // Show / hide approval section
+      const approvalSection =
+        document.getElementById("approvalSectionResult");
+
+      const approvalRequestElement =
+        document.getElementById("approvalRequestResult");
+
+      if (approvalSection) {
+        if (requiresApproval) {
+          approvalSection.classList.remove("hidden");
+
+          if (approvalRequestElement) {
+            approvalRequestElement.textContent = approvalRequest;
+          }
+        } else {
+          approvalSection.classList.add("hidden");
+        }
+      }
+
+    });
+  </script>
+</body>
+</html>
